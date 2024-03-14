@@ -319,6 +319,12 @@ class FP16_Optimizer(DeepSpeedOptimizer):
 
         return combined_scale
 
+    def preprocess_backward(self):
+        pass
+            
+    def postprocess_backward(self):
+        pass
+      
     def backward(self, loss, create_graph=False, retain_graph=False):
         """
         :attr:`backward` performs the following steps:
