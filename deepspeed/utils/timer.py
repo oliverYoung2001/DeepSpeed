@@ -236,9 +236,12 @@ class ThroughputTimer:
     def start(self):
         self._init_timer()
         self.started = True
-        if self.global_step_count >= self.start_step:
-            get_accelerator().synchronize()
-            self.start_time = time.time()
+        # [NOTE]: hacked by yhy to eliminate C-G sync !!!
+        self.start_time = 0
+        # print(f'!!! HACKED !!!')
+        # if self.global_step_count >= self.start_step:
+        #     get_accelerator().synchronize()
+        #     self.start_time = time.time()
 
     def stop(self, global_step=False, report_speed=True):
         if not self.started:
