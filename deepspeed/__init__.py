@@ -35,6 +35,7 @@ from .ops.transformer import DeepSpeedTransformerLayer, DeepSpeedTransformerConf
 from .module_inject import replace_transformer_layer, revert_transformer_layer
 
 from .utils import log_dist, OnDevice, logger
+from .utils.common import cuda_memory_analyze
 from .comm.comm import init_distributed
 
 from .runtime import zero
@@ -196,6 +197,7 @@ def initialize(args=None,
                                      collate_fn=collate_fn,
                                      config=config,
                                      config_class=config_class)
+            cuda_memory_analyze(step='2.1', print_mm_suage=True)
     else:
         assert mpu is None, "mpu must be None with pipeline parallelism"
         mpu = model.mpu()

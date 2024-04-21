@@ -26,6 +26,7 @@ from deepspeed.runtime.swap_tensor.partitioned_optimizer_swapper import Partitio
 from deepspeed.runtime.swap_tensor.pipelined_optimizer_swapper import PipelinedOptimizerSwapper
 from deepspeed.checkpoint.constants import OPTIMIZER_STATE_DICT, FP32_FLAT_GROUPS, PARTITION_COUNT, ZERO_STAGE, LOSS_SCALER
 from deepspeed.accelerator import get_accelerator
+from deepspeed.utils.common import cuda_memory_analyze
 
 # Toggle this to true to enable correctness test
 # with gradient partitioning and without
@@ -195,7 +196,8 @@ class DeepSpeedZeroOptimizer_Stage3(ZeROOptimizer):
         self._configure_offloading(offload_optimizer_config, offload_param_config)
 
         # backup fused_adam optimizer init
-        if self.offload_optimizer and self.partial_offload != 1.0:
+        # print(f'self.offload_optimizer: {self.offload_optimizer}')  # False
+        if self.offload_optimizer and self.partial_offload != 1.0:  # Flase
             backup_gpu_tensor = torch.randn(1, device='cuda').to(self.dtype)
             backup_gpu_param = torch.nn.Parameter(backup_gpu_tensor)
             assert type(init_optimizer) == DeepSpeedCPUAdam, 'Hybrid Optimizer Only Supports DeepSpeedCPUAdam'
@@ -467,16 +469,19 @@ class DeepSpeedZeroOptimizer_Stage3(ZeROOptimizer):
 
     def _setup_for_real_optimizer(self):
         see_memory_usage("Before creating fp32 partitions", force=True)
-        self._create_fp32_partitions()
+        cuda_memory_analyze(step='2.0.1.1.1', print_mm_suage=True)  # 3.4G
+        self._create_fp32_partitions()  # P, fp32, PARAMS * 4B
+        cuda_memory_analyze(step='2.0.1.1.2', print_mm_suage=True)  # 10.4G
         see_memory_usage("After creating fp32 partitions", force=True)
         dist.barrier()
 
         # To support pipelined optimizer swapping
-        self._create_next_swappable_fp32_groups()
+        self._create_next_swappable_fp32_groups()   # 0 when no pipe, else: ???
 
         see_memory_usage("Before initializing optimizer states", force=True)
-
-        self.initialize_optimizer_states()
+        cuda_memory_analyze(step='2.0.1.1.3', print_mm_suage=True)  # 10.4G
+        self.initialize_optimizer_states()  # OS, fp32, PARAMS * 4B * 2?
+        cuda_memory_analyze(step='2.0.1.1.4', print_mm_suage=True)  # 24.3G
         see_memory_usage("After initializing optimizer states", force=True)
         dist.barrier()
 
@@ -496,7 +501,9 @@ class DeepSpeedZeroOptimizer_Stage3(ZeROOptimizer):
 
         self.grad_partitions_flat_buffer: Tensor = torch.zeros(sum(p.partition_numel() for p in all_params),
                                                                dtype=self.gradient_accumulation_dtype,
-                                                               device=self.device)
+                                                               device=self.device)  # G, bf16, PARAMS * 2B
+        # print(f'self.gradient_accumulation_dtype: {self.gradient_accumulation_dtype}')  # bf16
+        cuda_memory_analyze(step='2.0.1.1.5', print_mm_suage=True)  # 28.7G
         if self.offload_optimizer_pin_memory:
             self.grad_partitions_flat_buffer = get_accelerator().pin_memory(self.grad_partitions_flat_buffer)
 
@@ -803,7 +810,9 @@ class DeepSpeedZeroOptimizer_Stage3(ZeROOptimizer):
         nvme_fp16_num_elems = []
         nvme_fp32_dest_tensors = []
         fp32_element_size = torch.tensor([], dtype=torch.float32).element_size()
-
+        # print(f'len(self.fp16_partitioned_groups_flat): {len(self.fp16_partitioned_groups_flat)}')  # 2
+        # print(f'len(swappable_fp32_tensors): {len(swappable_fp32_tensors)}')    # 0
+        # print(f'len(nvme_fp32_dest_tensors): {len(nvme_fp32_dest_tensors)}')    # 0
         # Assign portion of subgroup to cpu, the other to gpu.
         if self.offload_optimizer:
             self.subgroup_to_device = {}
@@ -817,9 +826,9 @@ class DeepSpeedZeroOptimizer_Stage3(ZeROOptimizer):
 
         for i, tensor in enumerate(self.fp16_partitioned_groups_flat):
             num_elements = self.fp16_partitioned_groups_flat_numel[i]
-
+            # print(f'i{i}, num_elements: {num_elements}, self._swappable_optimizer_subgroup(i): {self._swappable_optimizer_subgroup(i)}')    # , , False
             # a partition of the fp32 master weights that will be updated by this process
-            if self._swappable_optimizer_subgroup(i):
+            if self._swappable_optimizer_subgroup(i):   # False
                 self.fp32_partitioned_groups_flat.append(torch.Tensor())
                 nvme_memory_usage += (fp32_element_size * num_elements)
                 num_swappable_partitions += 1
@@ -827,7 +836,7 @@ class DeepSpeedZeroOptimizer_Stage3(ZeROOptimizer):
                 if self.params_in_nvme_and_cpu and tensor is None:
                     num_swap_from_nvme_partitions += 1
                     swap_from_nvme_memory_usage += (fp32_element_size * num_elements)
-                    if self.offload_optimizer_fast_init:
+                    if self.offload_optimizer_fast_init:    # False
                         sub_group_partitions = self._get_sub_group_partitions(i)
                         nvme_fp16_partitions_info.append(sub_group_partitions)
                         nvme_fp16_num_elems.append(num_elements)
@@ -846,25 +855,25 @@ class DeepSpeedZeroOptimizer_Stage3(ZeROOptimizer):
                 cpu_memory_usage += (fp32_element_size * num_elements)
                 cpu_memory_sub_groups += 1
 
-                if self.params_in_nvme_and_cpu and tensor is None:
+                if self.params_in_nvme_and_cpu and tensor is None:  # False
                     unpinned_fp32_buffer = torch.empty(num_elements, device=self.device, dtype=torch.float)
                     self._swap_in_sub_group_to_flat_buffer(unpinned_fp32_buffer, i)
                     self.fp32_partitioned_groups_flat.append(unpinned_fp32_buffer)
                 else:
-                    if self.offload_optimizer:
+                    if self.offload_optimizer:  # False
                         self.fp32_partitioned_groups_flat.append(self.fp16_partitioned_groups_flat[i].to(
                             self.subgroup_to_device[i]).clone().float().detach())
                     else:
                         self.fp32_partitioned_groups_flat.append(self.fp16_partitioned_groups_flat[i].to(
-                            self.device).clone().float().detach())
+                            self.device).clone().float().detach())  # [NOTE]: PARAMS * 4B, fp32
 
             self.fp32_partitioned_groups_flat[i].requires_grad = True  # keep this in case internal optimizer uses it
 
-        if len(swappable_fp32_tensors) > 0:
+        if len(swappable_fp32_tensors) > 0: # False
             self.optimizer_swapper.initialize_parameters(parameters=swappable_fp32_tensors,
                                                          src_tensors=swappable_fp16_src_tensors)
 
-        if len(nvme_fp32_dest_tensors) > 0:
+        if len(nvme_fp32_dest_tensors) > 0: # False
             fp16_pinned_buffers = self.fp16_groups[0][0].nvme_swapper.reserve_available_buffers()
             assert len(fp16_pinned_buffers) > 0
             self.optimizer_swapper.initialize_from_swapped_fp16_params(fp16_partitions_info=nvme_fp16_partitions_info,
@@ -924,7 +933,7 @@ class DeepSpeedZeroOptimizer_Stage3(ZeROOptimizer):
     def _optimizer_step(self, sub_group_id):
         param_group_id = self.sub_group_to_group_id[sub_group_id]
         fp32_param = self.fp32_partitioned_groups_flat[sub_group_id]
-        if self.offload_optimizer:
+        if self.offload_optimizer:  # False
             cur_device = self.subgroup_to_device[sub_group_id]
             if cur_device == 'cpu':
                 self.optimizer.param_groups[param_group_id]['params'] = [fp32_param]
@@ -971,35 +980,38 @@ class DeepSpeedZeroOptimizer_Stage3(ZeROOptimizer):
         num_subgroups = len(self.fp16_groups)
 
         largest_numel = max([sum([p.ds_numel for p in psg]) for psg in self.fp16_partitioned_groups])
-        gradient_dtype = self.fp32_partitioned_groups_flat[0].dtype
+        gradient_dtype = self.fp32_partitioned_groups_flat[0].dtype     # fp32
         gradient_buffer = torch.zeros(int(largest_numel), dtype=gradient_dtype, device=self.device)
+        print(f'largest_numel: {largest_numel}')    # 1G
 
         timer_names = set()
 
         # State initialization for the Adagrad optimizer occurs at construction as opposed to other optimizers
         # which do lazy initialization of the state at the first call to step.
-        is_adagrad = isinstance(self.optimizer, torch.optim.Adagrad)
-
-        if self.swap_optimizer:
+        is_adagrad = isinstance(self.optimizer, torch.optim.Adagrad)    # False
+        # print(f'is_adagrad: {is_adagrad}')  # False
+        # print(f'self.swap_optimizer: {self.swap_optimizer}')    # False
+        if self.swap_optimizer: # False
             self.optimizer_swapper.init_timers()
 
         timer_names.add(INIT_OPTIMIZER_TIMER)
         self.timers(INIT_OPTIMIZER_TIMER).start()
-
+        print(f'len(self.fp16_groups): {len(self.fp16_groups)}')
         for i, group in enumerate(self.fp16_groups):
             swappable_optimizer_subgroup = self._swappable_optimizer_subgroup(i)
             swappable_param_subgroup = self.fp16_partitioned_groups_flat[i] is None
 
             num_elements = int(self.fp16_partitioned_groups_flat_numel[i])
+            # print(f'i{i}, num_elements: {num_elements}, swappable_optimizer_subgroup: {swappable_optimizer_subgroup}, swappable_param_subgroup: {swappable_param_subgroup}')    # , , False, False
 
             see_memory_usage(
                 f'[Begin] Initialize optimizer states {i} / {num_subgroups} subgroups, num_elems: {num_elements}, swappable opt/param:{swappable_optimizer_subgroup}/{swappable_param_subgroup}',
                 force=False)
 
-            if swappable_optimizer_subgroup:
+            if swappable_optimizer_subgroup:    # False
                 self._optimizer_states_and_gradient_swap_in(i, timer_names)
 
-            if self.offload_optimizer and not swappable_optimizer_subgroup:
+            if self.offload_optimizer and not swappable_optimizer_subgroup: # False
                 subgroup_gradient_buffer = torch.zeros(num_elements, dtype=gradient_dtype, device=self.device)
                 if self.offload_optimizer_pin_memory:
                     subgroup_gradient_buffer = get_accelerator().pin_memory(subgroup_gradient_buffer)
@@ -1007,9 +1019,9 @@ class DeepSpeedZeroOptimizer_Stage3(ZeROOptimizer):
                 self.fp32_partitioned_groups_flat[i].grad = subgroup_gradient_buffer.to(self.subgroup_to_device[i])
             else:
                 self.fp32_partitioned_groups_flat[i].grad = gradient_buffer.narrow(0, 0, num_elements)
-
+            cuda_memory_analyze(step=f'2.0.1.1.3.{i}', print_mm_suage=True) # 14.1GB, 21.6GB
             # Initialize the optimizer states with the flattened fp32 partition.
-            if not is_adagrad:
+            if not is_adagrad:  # True
                 self._optimizer_step(i)
 
             if swappable_param_subgroup:
@@ -1021,18 +1033,18 @@ class DeepSpeedZeroOptimizer_Stage3(ZeROOptimizer):
             see_memory_usage(
                 f'[End] Initialize optimizer states {i} / {num_subgroups} subgroups, num_elems: {num_elements}, swappable opt/param:{swappable_optimizer_subgroup}/{swappable_param_subgroup}',
                 force=False)
-
+        cuda_memory_analyze(step='2.0.1.1.3.2', print_mm_suage=True)    # 28.7GB
         # Initialize the optimizer states with the flattened fp32 partition.
-        if is_adagrad:
+        if is_adagrad:  # False
             self.optimizer = torch.optim.Adagrad(self.fp32_partitioned_groups_flat, **self.optimizer.defaults)
 
         self.timers(INIT_OPTIMIZER_TIMER).stop()
         self.timers.log(timer_names)
 
-        if self.swap_optimizer:
+        if self.swap_optimizer: # False
             self.optimizer_swapper.log_timers()
 
-        if not self.offload_optimizer:
+        if not self.offload_optimizer:  # True
             for group in self.fp32_partitioned_groups_flat:
                 group.grad = None
 

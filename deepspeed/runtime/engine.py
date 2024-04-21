@@ -87,6 +87,7 @@ from deepspeed.runtime.data_pipeline.data_routing.basic_layer import RandomLayer
 
 from deepspeed.runtime.checkpoint_engine.torch_checkpoint_engine import TorchCheckpointEngine
 from deepspeed.utils.zero_to_fp32 import get_fp32_state_dict_from_zero_checkpoint
+from deepspeed.utils.common import cuda_memory_analyze
 
 from .pipe.module import PipelineModule
 from .utils import get_ma_status
@@ -310,7 +311,9 @@ class DeepSpeedEngine(Module):
 
         # print(f'LABEL2', flush=True)
         if has_optimizer:   # True
+            cuda_memory_analyze(step='2.0.1', print_mm_suage=True)  # PARAMS * 2B
             self._configure_optimizer(optimizer, model_parameters)
+            cuda_memory_analyze(step='2.0.2', print_mm_suage=True)  # PARAMS * (2 + 2 + X)B
             self._configure_lr_scheduler(lr_scheduler)
             self._report_progress(0)
         elif self.zero_optimization():
@@ -1270,8 +1273,10 @@ class DeepSpeedEngine(Module):
         optimizer_wrapper = self._do_optimizer_sanity_check(basic_optimizer)
         # if dist.get_rank() == 0:
         #     print(f'optimizer_wrapper: {optimizer_wrapper}')    # optimizer_wrapper = 'zero_optimizer'
+        cuda_memory_analyze(step='2.0.1.1', print_mm_suage=True)    # PARAMS * 2B
         if optimizer_wrapper == ZERO_OPTIMIZATION:  # True
             self.optimizer = self._configure_zero_optimizer(basic_optimizer)
+            cuda_memory_analyze(step='2.0.1.2', print_mm_suage=True)
         elif optimizer_wrapper == AMP:
             amp_params = self.amp_params()
             log_dist(f"Initializing AMP with these params: {amp_params}", ranks=[0])
