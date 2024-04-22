@@ -243,7 +243,7 @@ def get_communication_data_type(param_dict,
                                 comm_data_type_default=COMMUNICATION_DATA_TYPE_DEFAULT):
     val = get_scalar_param(param_dict, comm_type, comm_data_type_default)
     val = val.lower() if val is not None else val
-    print(f'rank{torch.distributed.get_rank()}, val: {val}, comm_type: {comm_type}, comm_data_type_default: {comm_data_type_default}, param_dict: {param_dict}')
+    # print(f'rank{torch.distributed.get_rank()}, val: {val}, comm_type: {comm_type}, comm_data_type_default: {comm_data_type_default}, param_dict: {param_dict}')
     if val is None:
         return val  # we must determine it by other parameters
     elif val == "fp32":

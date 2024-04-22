@@ -431,7 +431,7 @@ class PartitionedParameterCoordinator:
             else:
                 nonquantized_params.append(param)
         # print_rank_0(f'quantized_params: {len(quantized_params)}, nonquantized_params: {len(nonquantized_params)}', force=True) # 0, 1
-        if quantized_params:
+        if quantized_params:    # False
             self.__all_gather_params_(quantized_params, forward, quantize=True)
         if nonquantized_params:
             self.__all_gather_params_(nonquantized_params, forward, quantize=self.zero_quantized_weights)

@@ -146,8 +146,8 @@ def initialize(args=None,
     from deepspeed import comm as dist
     dist_backend = get_accelerator().communication_backend_name()
     dist.init_distributed(dist_backend=dist_backend, dist_init_required=dist_init_required)
-    if dist.get_rank() == 0:
-        print(f'in deepspeed.initialize()', flush=True)
+    # if dist.get_rank() == 0:
+    #     print(f'in deepspeed.initialize()', flush=True)
     # Set config using config_params for backwards compat
     if config is None and config_params is not None:
         config = config_params
@@ -171,10 +171,10 @@ def initialize(args=None,
         # print_model_param(model)
     if not isinstance(model, PipelineModule):   # pipe
         config_class = DeepSpeedConfig(config, mpu)
-        if dist.get_rank() == 0:
+        # if dist.get_rank() == 0:
             # print(f'config_class.hybrid_engine.enabled: {config_class.hybrid_engine.enabled}')  # False ???
-            print(f'config: {config}')
-            print(f'config_class: {config_class}')
+            # print(f'config: {config}')
+            # print(f'config_class: {config_class}')
         if config_class.hybrid_engine.enabled:  # False
             engine = DeepSpeedHybridEngine(args=args,
                                            model=model,
