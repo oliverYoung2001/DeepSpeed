@@ -171,8 +171,10 @@ def initialize(args=None,
         # print_model_param(model)
     if not isinstance(model, PipelineModule):   # pipe
         config_class = DeepSpeedConfig(config, mpu)
-        # if dist.get_rank() == 0:
-        #     print(f'config_class.hybrid_engine.enabled: {config_class.hybrid_engine.enabled}')  # False ???
+        if dist.get_rank() == 0:
+            # print(f'config_class.hybrid_engine.enabled: {config_class.hybrid_engine.enabled}')  # False ???
+            print(f'config: {config}')
+            print(f'config_class: {config_class}')
         if config_class.hybrid_engine.enabled:  # False
             engine = DeepSpeedHybridEngine(args=args,
                                            model=model,

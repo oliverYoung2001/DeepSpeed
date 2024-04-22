@@ -1542,7 +1542,7 @@ class DeepSpeedEngine(Module):
                     overlap_comm = False
             # if dist.get_rank() == 0:
             #     print(f'before optimizer', flush=True)
-            print(f'self.communication_data_type: {self.communication_data_type}')
+            # print(f'self.communication_data_type: {self.communication_data_type}')
             optimizer = DeepSpeedZeroOptimizer( # stage1/2
                 optimizer,
                 self.param_names,
@@ -1573,8 +1573,8 @@ class DeepSpeedEngine(Module):
                 gradient_accumulation_dtype=gradient_accumulation_dtype,
                 communication_data_type=self.communication_data_type,
                 elastic_checkpoint=self.zero_elastic_checkpoint())
-            if dist.get_rank() == 0:
-                print(f'after optimizer', flush=True)
+            # if dist.get_rank() == 0:
+            #     print(f'after optimizer', flush=True)
 
         elif zero_stage == ZeroStageEnum.weights:
             assert not self.has_moe_layers, "MoE not supported with Stage 3"

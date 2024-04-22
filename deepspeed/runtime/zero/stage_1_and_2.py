@@ -328,16 +328,16 @@ class DeepSpeedZeroOptimizer(ZeROOptimizer):
             # This ensures that gradients are reduced in a fashion such that ownership round robins among the ranks.
             # For example, rather than 3 gradients (g_n+2, g_n+1, g_n) that are reduced consecutively belonging
             # to the same rank, instead they will belong to 3 ranks (r_m+2, r_m+1, r_m).
-            if dist.get_rank() == 0:
-                print(f'self.round_robin_gradients: {self.round_robin_gradients}', flush=True)
+            # if dist.get_rank() == 0:
+            #     print(f'self.round_robin_gradients: {self.round_robin_gradients}', flush=True)
             if self.round_robin_gradients:  # False
                 round_robin_tensors, round_robin_indices = self._round_robin_reorder(
                     self.bit16_groups[i], dist.get_world_size(group=self.real_dp_process_group[i]))
             else:
                 round_robin_tensors = self.bit16_groups[i]
                 round_robin_indices = list(range(len(self.bit16_groups[i])))
-            if dist.get_rank() == 0:
-                print(f'LABEL2', flush=True)
+            # if dist.get_rank() == 0:
+                # print(f'LABEL2', flush=True)
             self.round_robin_bit16_groups.append(round_robin_tensors)
             self.round_robin_bit16_indices.append(round_robin_indices)
 
@@ -362,8 +362,8 @@ class DeepSpeedZeroOptimizer(ZeROOptimizer):
 
             # set model bit16 weight to slices of flattened buffer
             self._update_model_bit16_weights(i)
-            if dist.get_rank() == 0:
-                print(f'LABEL3', flush=True)
+            # if dist.get_rank() == 0:
+            #     print(f'LABEL3', flush=True)
 
             # divide the flat weights into near equal partition equal to the data parallel degree
             # each process will compute on a different part of the partition
@@ -1485,14 +1485,15 @@ class DeepSpeedZeroOptimizer(ZeROOptimizer):
         process_group = self.dp_process_group if process_group is None else process_group
 
         tensor_to_allreduce = tensor
-
-        if pg_correctness_test or self.sequence_parallel_size > 1:
-            communication_data_type = torch.float32
-        else:
-            communication_data_type = self.communication_data_type
-        print(f'communication_data_type: {communication_data_type}')
-        print(f'tensor.dtype: {tensor.dtype}')
-        if communication_data_type != tensor.dtype:
+        # print(f'pg_correctness_test: {pg_correctness_test}')    # False
+        # if pg_correctness_test or self.sequence_parallel_size > 1:
+        #     communication_data_type = torch.float32
+        # else:
+        #     communication_data_type = self.communication_data_type
+        communication_data_type = self.communication_data_type  # [NOTE]: modified by yhy
+        # print(f'communication_data_type: {communication_data_type}')    # bf16
+        # print(f'tensor.dtype: {tensor.dtype}')  # bf16
+        if communication_data_type != tensor.dtype: # False
             tensor_to_allreduce = tensor.to(communication_data_type)
 
         if divide:

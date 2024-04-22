@@ -243,16 +243,17 @@ def get_communication_data_type(param_dict,
                                 comm_data_type_default=COMMUNICATION_DATA_TYPE_DEFAULT):
     val = get_scalar_param(param_dict, comm_type, comm_data_type_default)
     val = val.lower() if val is not None else val
+    print(f'rank{torch.distributed.get_rank()}, val: {val}, comm_type: {comm_type}, comm_data_type_default: {comm_data_type_default}, param_dict: {param_dict}')
     if val is None:
         return val  # we must determine it by other parameters
     elif val == "fp32":
         return torch.float32
     elif val == "fp16":
         return torch.float16
-    elif val == "bfp16":
+    elif val == "bf16":
         return torch.bfloat16
 
-    raise ValueError(f"Invalid communication_data_type. Supported data types: ['fp16', 'bfp16', 'fp32']. Got: {val}")
+    raise ValueError(f"Invalid communication_data_type. Supported data types: ['fp16', 'bf16', 'fp32']. Got: {val}")
 
 
 def get_prescale_gradients(param_dict):
