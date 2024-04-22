@@ -137,7 +137,7 @@ class DeepSpeedZeroOptimizer(ZeROOptimizer):
                  has_moe_layers=False,
                  fp16_master_weights_and_gradients=False,
                  elastic_checkpoint=False):
-
+        self.comm_handles = []
         if offload_optimizer_config is not None and offload_optimizer_config.device != OffloadDeviceEnum.none:
             self.cpu_offload = True
             self.cpu_offload_pin_memory = offload_optimizer_config.pin_memory
@@ -677,8 +677,8 @@ class DeepSpeedZeroOptimizer(ZeROOptimizer):
     #################### ZeRO Stage 1 - reduce gradients ####################
     #########################################################################
     def reduce_gradients(self, pipeline_parallel=False):
-        # if dist.get_rank() == 0:
-        #     print(f'ZeRO Stage 1 - reduce gradients !!!', flush=True)   # Reachable !!!
+        if dist.get_rank() == 0:
+            print(f'ZeRO Stage 1/2 - reduce gradients !!!', flush=True)   # Reachable !!!
         world_size = dist.get_world_size(self.dp_process_group)
         my_rank = dist.get_rank(self.dp_process_group)
 
@@ -744,8 +744,11 @@ class DeepSpeedZeroOptimizer(ZeROOptimizer):
         #    logger.info("Params already reduced %s", self.params_already_reduced)
         for i in range(len(self.params_already_reduced)):
             self.params_already_reduced[i] = False
-
+        # print(f'in independent_gradient_partition_epilogue')  # Reachable for ZeRO2 with overlap_comm=True, contiguous_gradients=False
         if self.overlap_comm:
+            for handle in self.comm_handles:
+                handle.wait()
+            self.comm_handles = []
             get_accelerator().synchronize()
             # It is safe to clear previously reduced grads of other partitions
             self._clear_previous_reduced_grads()
@@ -908,7 +911,7 @@ class DeepSpeedZeroOptimizer(ZeROOptimizer):
         return self.flatten(align_dense_tensors(tensor_list, alignment))
 
     ############### Independent Partition Gradient ########################
-    def reduce_independent_p_g_buckets_and_remove_grads(self, param, i):    # stage2
+    def reduce_independent_p_g_buckets_and_remove_grads(self, param, i):    # stage1/stage2
 
         grad_reduc = self.get_gradient_for_reduction(param)
         if self.elements_in_ipg_bucket + param.numel() > self.reduce_bucket_size:
@@ -984,6 +987,7 @@ class DeepSpeedZeroOptimizer(ZeROOptimizer):
                                                divide=True,
                                                process_group=None,
                                                bucket_ranks=None):
+        # print(f'rank{dist.get_rank()}, bucket_ranks: {bucket_ranks}')   # the same for all ranks
         process_group = self.dp_process_group if process_group is None else process_group
         allreduced = self.allreduce_bucket(small_bucket, log=log, divide=divide, process_group=process_group)
         for buf, synced, bucket_rank in zip(small_bucket, self.unflatten(allreduced, small_bucket), bucket_ranks):
@@ -1025,9 +1029,10 @@ class DeepSpeedZeroOptimizer(ZeROOptimizer):
                 stream.wait_stream(get_accelerator().current_stream())
         else:
             stream = get_accelerator().current_stream()
-
+        # if dist.get_rank() == 0:
+        #     print(f'self.reduce_scatter: {self.reduce_scatter}')    # True
         with get_accelerator().stream(stream):
-            if not self.reduce_scatter:
+            if not self.reduce_scatter: # False
                 self.gradient_reduction_w_predivide(tensor)
                 return
 
@@ -1107,7 +1112,9 @@ class DeepSpeedZeroOptimizer(ZeROOptimizer):
                     buckets[bucket_key].append(grad_slice)
 
             for bucket_key in buckets:
-                if self.use_multi_rank_bucket_allreduce:
+                # if dist.get_rank() == 0:
+                #     print(f'self.use_multi_rank_bucket_allreduce: {self.use_multi_rank_bucket_allreduce}')  # True
+                if self.use_multi_rank_bucket_allreduce:    # True
                     self.allreduce_and_scatter(buckets[bucket_key],
                                                numel_per_bucket=self.reduce_bucket_size,
                                                divide=self.ipg_bucket_has_moe_params,
@@ -1338,6 +1345,11 @@ class DeepSpeedZeroOptimizer(ZeROOptimizer):
         self.grads_in_partition_offset += param.numel()
 
     def reduce_ipg_grads(self):
+        if self.overlap_comm:   # [NOTE]: modified by yhy
+            for handle in self.comm_handles:
+                handle.wait()
+            self.comm_handles = []
+            self._clear_previous_reduced_grads()
         if self.contiguous_gradients:   # True
             if self.extra_large_param_to_reduce is not None:
                 assert len(self.params_in_ipg_bucket) == 1, "more than 1 param in ipg bucket, this shouldn't happen"
@@ -1354,8 +1366,10 @@ class DeepSpeedZeroOptimizer(ZeROOptimizer):
                                           self.grads_in_ipg_bucket,
                                           elements_per_buffer=self.elements_in_ipg_bucket)
         # if dist.get_rank() == 0:
-        #     print(f'self.overlap_comm: {self.overlap_comm}', flush=True)    # False
+        #     print(f'self.overlap_comm: {self.overlap_comm}', flush=True)    #
         #     print(f'self.cpu_offload: {self.cpu_offload}', flush=True)  # False
+        #     print(f'self.reduction_stream: {self.reduction_stream}')
+        #     print(f'get_accelerator().current_stream(): {get_accelerator().current_stream()}', flush=True)
         if self.overlap_comm:   # False
             stream = self.reduction_stream
         elif self.cpu_offload:  # False
@@ -1365,7 +1379,7 @@ class DeepSpeedZeroOptimizer(ZeROOptimizer):
             stream = get_accelerator().current_stream()
         else:
             stream = get_accelerator().current_stream()
-
+        # print(f'rank{dist.get_rank()}, self.is_param_in_current_partition: {self.is_param_in_current_partition}', flush=True)
         with get_accelerator().stream(stream):
             for _, param, param_id in self.params_in_ipg_bucket:
 
@@ -1375,9 +1389,9 @@ class DeepSpeedZeroOptimizer(ZeROOptimizer):
                     Multiple gradient reduction is currently not supported"
 
                 self.params_already_reduced[param_id] = True
-                if self.partition_gradients:
+                if self.partition_gradients:    # True for ZeRO2 else False
                     if not self.is_param_in_current_partition[param_id]:
-                        if self.overlap_comm and self.contiguous_gradients is False:
+                        if self.overlap_comm and self.contiguous_gradients is False:    # False
                             # Clear grads of other partitions during the next reduction
                             # to avoid clearing them before the reduction is complete.
                             if self.previous_reduced_grads is None:
@@ -1385,7 +1399,7 @@ class DeepSpeedZeroOptimizer(ZeROOptimizer):
                             self.previous_reduced_grads.append(param)
                         else:
                             self.clear_grad_attribute(param)
-                    elif self.contiguous_gradients:
+                    elif self.contiguous_gradients: # True
                         self.copy_grads_in_partition(param)
                 else:  # zero stage 1 - partition only optimizer state
                     if self.contiguous_gradients and self.is_param_in_current_partition[param_id]:
@@ -1398,6 +1412,7 @@ class DeepSpeedZeroOptimizer(ZeROOptimizer):
         #####################################################################
 
     def reduce_ready_partitions_and_remove_grads(self, param, i):
+        # print(f'rank{dist.get_rank()}, self.is_gradient_accumulation_boundary: {self.is_gradient_accumulation_boundary}') # True for last mbs
         if self.partition_gradients or self.is_gradient_accumulation_boundary:
             self.reduce_independent_p_g_buckets_and_remove_grads(param, i)
 
@@ -1475,16 +1490,21 @@ class DeepSpeedZeroOptimizer(ZeROOptimizer):
             communication_data_type = torch.float32
         else:
             communication_data_type = self.communication_data_type
-
+        print(f'communication_data_type: {communication_data_type}')
+        print(f'tensor.dtype: {tensor.dtype}')
         if communication_data_type != tensor.dtype:
             tensor_to_allreduce = tensor.to(communication_data_type)
 
         if divide:
             tensor_to_allreduce.div_(dist.get_world_size(group=process_group) / float(self.sequence_parallel_size))
 
-        if rank is None:
+        if rank is None:    # True
             #    "All Reducing"
-            dist.all_reduce(tensor_to_allreduce, group=process_group)
+            if not self.overlap_comm:   # [NOTE]: modified by yhy
+                dist.all_reduce(tensor_to_allreduce, group=process_group)
+            else:
+                handle = dist.all_reduce(tensor_to_allreduce, group=process_group, async_op=True)
+                self.comm_handles.append(handle)
         else:
             global_rank = dist.get_global_rank(process_group, rank)
             dist.reduce(tensor_to_allreduce, global_rank, group=process_group)
@@ -1504,6 +1524,7 @@ class DeepSpeedZeroOptimizer(ZeROOptimizer):
     # if rank is specified do a reduction instead of an allreduce
     def allreduce_and_copy(self, small_bucket, rank=None, log=None, divide=True, process_group=None):
         process_group = self.dp_process_group if process_group is None else process_group
+        # print(f'in allreduce_and_copy') # Reachable for ZeRO2 with overlap_comm=True, contiguous_gradients=False
         if self.overlap_comm:
             get_accelerator().synchronize()
             # It is safe to clear the previously reduced grads of other partitions
@@ -1765,7 +1786,7 @@ class DeepSpeedZeroOptimizer(ZeROOptimizer):
             else:
                 norm_groups.append(self.get_grad_norm_direct(self.averaged_gradients[i], self.params_in_partition[i]))
 
-        if self.has_moe_layers:
+        if self.has_moe_layers: # False
             self._average_expert_grad_norms(norm_groups)
 
         # note that the get_global_norm function only supports l2 norm
@@ -1827,7 +1848,7 @@ class DeepSpeedZeroOptimizer(ZeROOptimizer):
         for i, group in enumerate(self.bit16_groups):
             self.timers(OPTIMIZER_GRADIENTS_TIMER).start()
             partition_id = dist.get_rank(group=self.real_dp_process_group[i])
-            if self.cpu_offload:
+            if self.cpu_offload:    # False
                 single_grad_partition = self.single_partition_of_fp32_groups[i].grad
                 self.unscale_and_clip_grads([single_grad_partition], scaled_global_grad_norm)
 

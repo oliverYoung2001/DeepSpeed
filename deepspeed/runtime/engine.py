@@ -1542,6 +1542,7 @@ class DeepSpeedEngine(Module):
                     overlap_comm = False
             # if dist.get_rank() == 0:
             #     print(f'before optimizer', flush=True)
+            print(f'self.communication_data_type: {self.communication_data_type}')
             optimizer = DeepSpeedZeroOptimizer( # stage1/2
                 optimizer,
                 self.param_names,
@@ -1964,7 +1965,7 @@ class DeepSpeedEngine(Module):
         # Communicate only at gradient accumulation boundaries
         elif self.is_gradient_accumulation_boundary():  # Reachable in stage1
             if self.zero_optimization_stage() == ZeroStageEnum.optimizer_states and hasattr(
-                    self.optimizer, 'reduce_gradients'):
+                    self.optimizer, 'reduce_gradients'):    # True
                 self.optimizer.reduce_gradients(pipeline_parallel=self.pipeline_parallelism)    
             else:
                 self.buffered_allreduce_fallback(elements_per_buffer=bucket_size)   
