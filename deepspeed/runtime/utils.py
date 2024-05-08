@@ -961,12 +961,14 @@ def all_gather_into_tensor_dp_groups(groups_flat, partitioned_param_groups, dp_p
             # no groups share optimizer states
             # pipeline parallel with bf16 will default call this even if dp size = 1.
             continue
+        print(f'rank{dist.get_rank()}, group_id: {group_id}, partition_id: {partition_id}, group_flat: {group_flat.shape}, {group_flat.dtype}, partitioned_params[partition_id]: {partitioned_params[partition_id].shape}')
         dist.all_gather_into_tensor(group_flat, partitioned_params[partition_id], dp_process_group[group_id])
 
 
 def all_gather_dp_groups(groups_flat, partitioned_param_groups, dp_process_group, start_alignment_factor,
                          allgather_bucket_size):
-    if dist.has_all_gather_into_tensor():
+    # print(f'dist.has_all_gather_into_tensor(): {dist.has_all_gather_into_tensor()}')    # True
+    if dist.has_all_gather_into_tensor():   # True
         return all_gather_into_tensor_dp_groups(groups_flat, partitioned_param_groups, dp_process_group)
 
     for group_id, partitioned_params in enumerate(partitioned_param_groups):

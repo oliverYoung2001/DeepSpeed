@@ -2,7 +2,7 @@
 # SPDX-License-Identifier: Apache-2.0
 
 # DeepSpeed Team
-
+import time
 import sys
 import types
 import json
@@ -13,18 +13,16 @@ from torch.optim.lr_scheduler import _LRScheduler
 from packaging import version as pkg_version
 
 try:
-    import triton  # noqa: F401 # type: ignore
+    import triton  # noqa: F401 # type: ignore  # 2s
     HAS_TRITON = True
 except ImportError:
     HAS_TRITON = False
-
-from . import ops
-from . import module_inject
-
+# print(f'HAS_TRITON: {HAS_TRITON}')  # True
+from . import ops, module_inject    # 2s
 from .accelerator import get_accelerator
 from .runtime.engine import DeepSpeedEngine, DeepSpeedOptimizerCallable, DeepSpeedSchedulerCallable
 from .runtime.engine import ADAM_OPTIMIZER, LAMB_OPTIMIZER
-from .runtime.hybrid_engine import DeepSpeedHybridEngine
+from .runtime.hybrid_engine import DeepSpeedHybridEngine    # 5s
 from .runtime.pipe.engine import PipelineEngine
 from .inference.engine import InferenceEngine
 from .inference.config import DeepSpeedInferenceConfig
@@ -33,18 +31,15 @@ from .runtime.config import DeepSpeedConfig, DeepSpeedConfigError
 from .runtime.activation_checkpointing import checkpointing
 from .ops.transformer import DeepSpeedTransformerLayer, DeepSpeedTransformerConfig
 from .module_inject import replace_transformer_layer, revert_transformer_layer
-
 from .utils import log_dist, OnDevice, logger
 from .utils.common import cuda_memory_analyze
 from .comm.comm import init_distributed
-
 from .runtime import zero
 from .runtime import DeepSpeedOptimizer, ZeROOptimizer
 
 from .pipe import PipelineModule
 
 from .git_version_info import version, git_hash, git_branch
-
 
 def _parse_version(version_str):
     '''Parse a version string and extract the major, minor, and patch versions.'''

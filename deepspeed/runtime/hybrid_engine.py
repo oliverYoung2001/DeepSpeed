@@ -3,6 +3,9 @@
 
 # DeepSpeed Team
 
+import time
+import gc
+import math
 import torch
 from deepspeed.inference.config import DeepSpeedInferenceConfig
 from deepspeed.module_inject.replace_policy import replace_policies
@@ -10,24 +13,21 @@ from deepspeed.module_inject.utils import policy_to_ds_container
 from .engine import DeepSpeedEngine
 from .utils import TLinear, get_inactive_params
 from deepspeed.runtime.zero import GatheredParameters
-import time
-import gc
-import math
 from deepspeed import comm as dist
 from deepspeed.accelerator import get_accelerator
 from torch import nn
 from deepspeed.utils import logger
-
 from deepspeed.ops.op_builder import InferenceBuilder
-
 from deepspeed.module_inject.layers import LinearLayer, Normalize, EmbeddingLayer, OPTEmbedding
+# print(f'{time.asctime( time.localtime(time.time()))}, label_d1.0', flush=True)
 try:
-    import transformers
-    OPTLearnedPositionalEmbedding = transformers.models.opt.modeling_opt.OPTLearnedPositionalEmbedding
+    import transformers # 2s
+    # print(f'{time.asctime( time.localtime(time.time()))}, label_d1.1', flush=True)
+    OPTLearnedPositionalEmbedding = transformers.models.opt.modeling_opt.OPTLearnedPositionalEmbedding  # 4s
 except:
     OPTLearnedPositionalEmbedding = None
 inference_cuda_module = None
-
+# print(f'{time.asctime( time.localtime(time.time()))}, label_d1.2', flush=True)
 
 class DeepSpeedHybridEngine(DeepSpeedEngine):
     r"""DeepSpeed engine for training and inference."""

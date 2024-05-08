@@ -181,8 +181,9 @@ def parse_arguments():
 
 def main(hide_operator_status=False, hide_errors_and_warnings=False):
     if not hide_operator_status:
-        op_report(verbose=not hide_errors_and_warnings)
-    debug_report()
+        pass
+        # op_report(verbose=not hide_errors_and_warnings)
+    # debug_report()
 
 
 def cli_main():

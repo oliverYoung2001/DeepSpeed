@@ -102,7 +102,7 @@ class PartitionedParameterCoordinator:
         # queue for parameters to fetch. parameters will be popped off the left
         # side of the dequeue as they are fetched
         self.__param_queue: Deque[__class__.__ParamInTrace] = None
-        print_rank_0(f'prefetch_bucket_sz: {prefetch_bucket_sz}', force=True)
+        # print_rank_0(f'prefetch_bucket_sz: {prefetch_bucket_sz}', force=True)
         self.__prefetch_bucket_sz: int = prefetch_bucket_sz
         self.__prefetch_nvme: bool = prefetch_nvme
         self.hierarchy: int = 0
@@ -189,9 +189,9 @@ class PartitionedParameterCoordinator:
             raise RuntimeError(f"attempted to record trace when status = {self.__trace_mode}")
 
         step_id = self.__step_id_module_fetched_for[sub_module.id].popleft()
-        print_rank_0(f'step_id: {step_id}', force=True)
+        # print_rank_0(f'step_id: {step_id}', force=True)
         for param in sorted(set(iter_params(sub_module)), key=lambda p: p.ds_id):
-            print_rank_0(f'param: {param.shape}, {param.ds_status}, {param.partition_numel()}', force=True)
+            # print_rank_0(f'param: {param.shape}, {param.ds_status}, {param.partition_numel()}', force=True)
             self.__param_order.append(__class__.__ParamInTrace(param=param, step_id_last_used_at=step_id))
 
     def construct_parameter_trace_from_module_trace(self):
@@ -199,7 +199,7 @@ class PartitionedParameterCoordinator:
         self.__param_order = []
         # print_rank_0(f'__submodule_order:', force=True)
         for sub_module in self.__submodule_order:   # include both forward and backward
-            print_rank_0(f'{type(sub_module).__name__}', force=True)
+            # print_rank_0(f'{type(sub_module).__name__}', force=True)
             self.record_parameters(sub_module)
 
     def reset_step(self) -> None:
@@ -232,7 +232,7 @@ class PartitionedParameterCoordinator:
         else:
             if self.__profiler is not None:
                 self.__profiler.log_events()
-        print_rank_0(f'self.__param_order: {len(self.__param_order)}', force=True)
+        # print_rank_0(f'self.__param_order: {len(self.__param_order)}', force=True)
         self.__param_queue = collections.deque(self.__param_order)  # reset fetch queue
         self.__most_recent_step_id_param_fetched_for = collections.defaultdict(lambda: int(-1e10))
         self.__step_id_module_fetched_for = collections.defaultdict(lambda: collections.deque())
@@ -278,7 +278,7 @@ class PartitionedParameterCoordinator:
             [p.partition_numel() for p in params_to_fetch if p.ds_status == ZeroParamStatus.NOT_AVAILABLE])
         # print(f'rank{dist.get_rank()}, {type(current_submodule).__name__}: {fetch_numel}, forward: {forward}, step_id: {self.__step_id}')
         # for p in params_to_fetch:
-        #     print_rank_0(f'rank{dist.get_rank()}, {p.shape}, {p.ds_status}, {p.partition_numel()}', force=True)    # shape=0, AVAILABLE when prefetch is executed
+        #     print_rank_0(f'rank{dist.get_rank()}, {p.shape}, {p.ds_status}, {p.partition_numel()}, {p.type()}', force=True)    # shape=0, AVAILABLE when prefetch is executed
         if fetch_numel > 0:
             event_name = __class__.FORWARD_FETCH_SUBMIT if forward else __class__.BACKWARD_FETCH_SUBMIT
             self._dump_param_ids(event_name, current_submodule.id,
@@ -379,7 +379,7 @@ class PartitionedParameterCoordinator:
                     if do_prefetch:
                         params_to_prefetch.add(param_in_trace.param)
                         numel_prefetching += param_in_trace.param.ds_numel
-                print_rank_0(f'{type(current_submodule).__name__}, __step_id: {self.__step_id}, numel_prefetching: {numel_prefetching}', force=True)
+                # print_rank_0(f'{type(current_submodule).__name__}, __step_id: {self.__step_id}, numel_prefetching: {numel_prefetching}', force=True)
                 if numel_prefetching > 0:
                     event_name = __class__.FORWARD_PREFETCH_SUBMIT if forward else __class__.BACKWARD_PREFETCH_SUBMIT
                     self.__profiler.start_event(event_name)
@@ -447,7 +447,7 @@ class PartitionedParameterCoordinator:
             if param.ds_status == ZeroParamStatus.NOT_AVAILABLE:
                 partitioned_params.append(param)
                 all_gather_numel += param.ds_numel
-        print(f'partitioned_params[0]: {type(partitioned_params[0])}')
+        # print(f'partitioned_params[0]: {type(partitioned_params[0])}')
         if partitioned_params:
             partitioned_params
             self.__n_available_params += all_gather_numel

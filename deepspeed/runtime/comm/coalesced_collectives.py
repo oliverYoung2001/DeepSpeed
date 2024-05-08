@@ -20,7 +20,7 @@ from deepspeed.ops import op_builder
 
 
 def _torch_reduce_scatter_fn(input_tensor: Tensor, output_tensor: Tensor, group=None, async_op=False, prof=False):
-    return instrument_w_nvtx(dist.reduce_scatter_fn)(output_tensor, input_tensor, group=group, async_op=False)
+    return instrument_w_nvtx(dist.reduce_scatter_fn)(output_tensor, input_tensor, group=group, async_op=async_op)
 
 
 quantizer_module = None
@@ -73,6 +73,7 @@ def all_to_all_quant_reduce(tensors: List[Tensor], groups: {}) -> List[Tensor]:
 def reduce_scatter_coalesced(
     tensors: List[Tensor],
     group: ProcessGroup = None,
+    async_op: bool = False,
 ) -> List[Tensor]:
     """simultaneously reduce-scatter a list of tensors - this can be done more
     efficiently than individual reduce scatter calls
@@ -117,9 +118,9 @@ def reduce_scatter_coalesced(
     tensor_partition_buffer_for_each_rank: List[Tensor] = torch.chunk(tensor_partition_flat_buffer, world_sz)
 
     # batched reduce-scatter call
-    _torch_reduce_scatter_fn(tensor_partition_flat_buffer,
+    handle = _torch_reduce_scatter_fn(tensor_partition_flat_buffer,
                              tensor_partition_buffer_for_each_rank[this_rank],
-                             group=group)
+                             group=group, async_op=async_op)
 
     # reverse procedure of the interleaving done previously, done on the
     # result of the batched reduce-scatter
@@ -130,4 +131,4 @@ def reduce_scatter_coalesced(
             0, offset, partition_lst_for_each_tensor[tensor_idx][this_rank].numel())
 
         offset += padded_partition_sz_for_each_tensor[tensor_idx]
-    return output_lst
+    return output_lst, handle

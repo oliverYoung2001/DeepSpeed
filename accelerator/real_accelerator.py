@@ -157,8 +157,8 @@ def get_accelerator():
 
         ds_accelerator = MPS_Accelerator()
     _validate_accelerator(ds_accelerator)
-    if accel_logger is not None:
-        accel_logger.info(f"Setting ds_accelerator to {ds_accelerator._name} ({ds_set_method})")
+    # if accel_logger is not None:
+    #     accel_logger.info(f"Setting ds_accelerator to {ds_accelerator._name} ({ds_set_method})")
     return ds_accelerator
 
 

@@ -1082,8 +1082,8 @@ class Init(InsertPostInitMethodToModuleSubClasses):
             partition_sz = sum(p.ds_tensor.ds_numel for p in params)
 
             use_secondary_tensor = params[0].ds_secondary_tensor is not None and not forward
-
-            if use_secondary_tensor:
+            # print(f'use_secondary_tensor: {use_secondary_tensor}')  # False
+            if use_secondary_tensor:    # False
                 partition_sz = sum(p.ds_tensor.ds_numel * p.ds_secondary_tensor_num_of_groups for p in params)
 
             flat_tensor = torch.empty(partition_sz * world_size,
@@ -1095,7 +1095,7 @@ class Init(InsertPostInitMethodToModuleSubClasses):
             for i in range(world_size):
                 partitions.append(flat_tensor.narrow(0, partition_sz * i, partition_sz))
 
-            if use_secondary_tensor:
+            if use_secondary_tensor:    # False
                 instrument_w_nvtx(
                     torch.cat)([p.ds_secondary_tensor.to(get_accelerator().current_device_name()) for p in params],
                                out=partitions[rank_in_group])
@@ -1161,7 +1161,7 @@ class Init(InsertPostInitMethodToModuleSubClasses):
                 # ensure that tensors from each rank agree on the same ds_numel
                 # otherwise could mix data between tensors.
                 assert_ints_same_as_other_ranks([p.ds_tensor.ds_numel for p in params])
-
+            # print(f'len(params): {len(params)}')
             if len(params) == 1:
                 # have an opportunity to avoid some intermediate memory allocations
                 param, = params
@@ -1210,7 +1210,8 @@ class Init(InsertPostInitMethodToModuleSubClasses):
                     return AllGatherHandle(handle, param, quantization=quant_info)
 
             else:
-                if not quantize:
+                # print(f'quantize: {quantize}')  # False
+                if not quantize:    # True
                     dtype_params = defaultdict(list)
                     for p in params:
                         dtype_params[p.ds_tensor.dtype].append(p)
@@ -1231,7 +1232,6 @@ class Init(InsertPostInitMethodToModuleSubClasses):
                                               dtype=torch.int8,
                                               device=get_accelerator().current_device_name(),
                                               requires_grad=False)
-
                     if use_secondary_tensor:
                         if hasattr(params[0].ds_secondary_tensor, "ds_quant_scale"):
                             quantized_param = instrument_w_nvtx(torch.cat)([
@@ -1494,7 +1494,7 @@ class Init(InsertPostInitMethodToModuleSubClasses):
             if param.ds_tensor is None: # True
                 final_location = None
                 if self.remote_device == OffloadDeviceEnum.nvme and self.param_swapper.swappable_tensor(
-                        numel=partition_size):
+                        numel=partition_size):  # False
                     final_location = OffloadDeviceEnum.nvme
                     buffer = self.param_swapper.get_buffer(param, partition_size)
                     partitioned_tensor = torch.empty(0, dtype=param.dtype, device=buffer.device)

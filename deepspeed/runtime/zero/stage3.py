@@ -120,6 +120,9 @@ class DeepSpeedZeroOptimizer_Stage3(ZeROOptimizer):
         zero_quantized_weights=False,
         zero_quantized_nontrainable_weights=False,
     ):
+        self.comm_handles = []  # [NOTE]: modified by yhy
+        self.overlap_comm = overlap_comm
+        # print(f'overlap_comm: {overlap_comm}')    
         see_memory_usage("Stage 3 initialize beginning", force=True)
 
         print_rank_0(f"initialized {__class__.__name__} with args: {locals()}", force=False)
@@ -982,7 +985,7 @@ class DeepSpeedZeroOptimizer_Stage3(ZeROOptimizer):
         largest_numel = max([sum([p.ds_numel for p in psg]) for psg in self.fp16_partitioned_groups])
         gradient_dtype = self.fp32_partitioned_groups_flat[0].dtype     # fp32
         gradient_buffer = torch.zeros(int(largest_numel), dtype=gradient_dtype, device=self.device)
-        print(f'largest_numel: {largest_numel}')    # 1G
+        # print(f'largest_numel: {largest_numel}')    # 1G
 
         timer_names = set()
 
@@ -996,7 +999,7 @@ class DeepSpeedZeroOptimizer_Stage3(ZeROOptimizer):
 
         timer_names.add(INIT_OPTIMIZER_TIMER)
         self.timers(INIT_OPTIMIZER_TIMER).start()
-        print(f'len(self.fp16_groups): {len(self.fp16_groups)}')
+        # print(f'len(self.fp16_groups): {len(self.fp16_groups)}')    # 1
         for i, group in enumerate(self.fp16_groups):
             swappable_optimizer_subgroup = self._swappable_optimizer_subgroup(i)
             swappable_param_subgroup = self.fp16_partitioned_groups_flat[i] is None
@@ -1095,6 +1098,11 @@ class DeepSpeedZeroOptimizer_Stage3(ZeROOptimizer):
         if not get_accelerator().is_synchronized_device():
             self.reduce_and_partition_stream.synchronize()
 
+        if self.overlap_comm: 
+            for handle in self.comm_handles:    # [NOTE]: modified by yhy
+                handle.wait()
+            self.comm_handles = []
+            # self._clear_previous_reduced_grads()
         #in case of cpu offload, averaged gradients are already in fp32_partitioned_groups_flat.grad
         #TODO: use a similar code path for both cpu_offload and non-cpu offload
         if not self.offload_optimizer:
@@ -1196,6 +1204,12 @@ class DeepSpeedZeroOptimizer_Stage3(ZeROOptimizer):
     def __reduce_and_partition_ipg_grads(self, safe_mode: bool = False) -> None:
         if not self.params_in_ipg_bucket:
             return
+        
+        if self.overlap_comm:   # [NOTE]: modified by yhy
+            for handle in self.comm_handles:
+                handle.wait()
+            self.comm_handles = []
+            # self._clear_previous_reduced_grads()
 
         for param in self.params_in_ipg_bucket:
             if param.grad.numel() != param.ds_numel:
@@ -1212,8 +1226,8 @@ class DeepSpeedZeroOptimizer_Stage3(ZeROOptimizer):
         with get_accelerator().stream(self.reduce_and_partition_stream):
             if safe_mode:
                 assert_ints_same_as_other_ranks([p.ds_id for p in self.params_in_ipg_bucket])
-
-            if self.contiguous_gradients and self.elements_in_ipg_bucket <= self.reduce_bucket_size and not self.reduce_scatter:
+            # print(f'self.reduce_scatter: {self.reduce_scatter}')    # True
+            if self.contiguous_gradients and self.elements_in_ipg_bucket <= self.reduce_bucket_size and not self.reduce_scatter: # True?False
                 grad_bucket = self.__ipg_bucket_flat_buffer.narrow(0, 0, self.elements_in_ipg_bucket)
                 grad_partitions = self.__avg_scatter_contiguous_grads(grad_bucket)
             else:
@@ -1284,10 +1298,15 @@ class DeepSpeedZeroOptimizer_Stage3(ZeROOptimizer):
         local_world_size = get_accelerator().device_count()
         global_world_size = dist.get_world_size()
         num_nodes = global_world_size // local_world_size
-        if self.all2all_process_group is not None and num_nodes > 1:
+        # print(f'self.all2all_process_group: {self.all2all_process_group}')  # None
+        if self.all2all_process_group is not None and num_nodes > 1:    # False
             grad_partitions_for_rank = all_to_all_quant_reduce(full_grads_for_rank, self.all2all_process_group)
         else:
-            grad_partitions_for_rank = reduce_scatter_coalesced(full_grads_for_rank, self.dp_process_group)
+            if not self.overlap_comm:   # [NOTE]: modified by yhy
+                grad_partitions_for_rank, _ = reduce_scatter_coalesced(full_grads_for_rank, self.dp_process_group)
+            else:
+                grad_partitions_for_rank, handle = reduce_scatter_coalesced(full_grads_for_rank, self.dp_process_group, async_op=True)
+                self.comm_handles.append(handle)
 
         if self.postscale_gradients and self.gradient_predivide_factor != 1.0 and self.gradient_predivide_factor != dist.get_world_size(
                 self.dp_process_group):
@@ -1532,11 +1551,11 @@ class DeepSpeedZeroOptimizer_Stage3(ZeROOptimizer):
 
         tensor_to_allreduce = tensor
 
-        if pg_correctness_test:
+        if pg_correctness_test: # False
             communication_data_type = torch.float32
         else:
             communication_data_type = self.communication_data_type
-
+        # print(f'communication_data_type: {communication_data_type}')  # bf16
         if communication_data_type != tensor.dtype:
             tensor_to_allreduce = tensor.to(communication_data_type)
 

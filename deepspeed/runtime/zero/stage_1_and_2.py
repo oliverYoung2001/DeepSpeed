@@ -137,7 +137,7 @@ class DeepSpeedZeroOptimizer(ZeROOptimizer):
                  has_moe_layers=False,
                  fp16_master_weights_and_gradients=False,
                  elastic_checkpoint=False):
-        self.comm_handles = []
+        self.comm_handles = []  # [NOTE]: modified by yhy
         if offload_optimizer_config is not None and offload_optimizer_config.device != OffloadDeviceEnum.none:
             self.cpu_offload = True
             self.cpu_offload_pin_memory = offload_optimizer_config.pin_memory
@@ -745,8 +745,8 @@ class DeepSpeedZeroOptimizer(ZeROOptimizer):
         for i in range(len(self.params_already_reduced)):
             self.params_already_reduced[i] = False
         # print(f'in independent_gradient_partition_epilogue')  # Reachable for ZeRO2 with overlap_comm=True, contiguous_gradients=False
-        if self.overlap_comm:
-            for handle in self.comm_handles:
+        if self.overlap_comm:   
+            for handle in self.comm_handles:    # [NOTE]: modified by yhy
                 handle.wait()
             self.comm_handles = []
             get_accelerator().synchronize()
@@ -945,7 +945,7 @@ class DeepSpeedZeroOptimizer(ZeROOptimizer):
         self.params_in_ipg_bucket.append((i, param, param_id))
 
         #make sure the average tensor function knows how to average the gradients
-        if is_moe_param(param):
+        if is_moe_param(param): # False
             self.ipg_bucket_has_moe_params = True
 
         self.report_ipg_memory_usage("End ipg_remove_grads", 0)
